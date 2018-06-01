@@ -1,0 +1,336 @@
+version: 2
+
+jobs:
+  build:
+    machine: true
+
+    environment: &environment_variables
+      # Temporary Files
+      BUILD_LOG: /tmp/build.log
+      AFFECTED_FILES: /tmp/committed.files
+      ERROR_LOG: /tmp/error.log
+      PROJECTS_TO_BUILD: /tmp/projects.to.build
+      PROJECTS_TO_ROLLBACK: /tmp/projects.to.rollback
+
+      # Build Variables	   
+      COMPANY_NAME: hautelook
+      DOCKER_CACHE_FROM: latest
+      HOME_PROJECT: /home/circleci/project
+      ROLLBACK_ENABLED: false
+      ROLLBACK_IMAGE: latest
+      TERRAFORM_VERSION: 0.10.8
+      TERRAFORM_LOCATION: ./deploy/dev
+      
+    steps:
+      - checkout
+
+      - run: &creating_temporary_files
+          name: "Creating Temporary Files"
+          type: shell
+          command: |
+            echo "Creating Temporary Files." \
+             && touch ${PROJECTS_TO_BUILD} \
+             && touch ${PROJECTS_TO_ROLLBACK} \
+             && touch ${AFFECTED_FILES} \
+             && touch ${BUILD_LOG} \
+             && touch ${ERROR_LOG} \
+             && echo "- Successfully created temporary files" \
+             || echo "- Failed to create temporary files."
+  
+      - run: &determine_projects_to_build
+          name: "Determine Projects to Build."
+          type: shell
+          command: |
+            echo "- Retrieving commit range." \
+              && COMMIT_RANGE=$(echo $CIRCLE_COMPARE_URL | awk -F'/' '{print $NF}') 
+
+            [ "${COMMIT_RANGE}" == "" ] \
+              && echo "  - Failed to retrieve commit range." \
+              && exit 1 \
+              || echo "  - Commit Range: ${COMMIT_RANGE}" 
+
+            echo "    - Retrieving affected files using commit range."
+            if [[ $COMMIT_RANGE = *".."* ]]; then
+              [ "${CIRCLE_BRANCH}" == "master" ] \
+                && git diff $COMMIT_RANGE --name-status | egrep "^[M|A|D]\s+" > ${AFFECTED_FILES} \
+                || true
+                
+              [ "${CIRCLE_BRANCH}" != "master" ] \
+                && startRange=$(echo ${COMMIT_RANGE} | awk -F"." '{print $1}') \
+                && git show ${startRange} --name-status 2>/dev/null | egrep "^[M|A|D]\s+" >> ${AFFECTED_FILES} \
+                || true
+                  
+              [ "${CIRCLE_BRANCH}" != "master" ] \
+                && endRange=$(echo ${COMMIT_RANGE} | awk -F"." '{print $NF}') \
+                && git show ${endRange} --name-status 2>/dev/null | egrep "^[M|A|D]\s+" >> ${AFFECTED_FILES} \
+                || true
+            else
+              git show $COMMIT_RANGE --name-status | egrep "^[M|A|D]\s+" > ${AFFECTED_FILES}
+            fi
+
+            echo "- Processing Affected Files"
+            cat ${AFFECTED_FILES} | awk '{print $2}' | awk -F"/" '{print $1"/"$2}' | grep -v "^\." | sort | uniq | while read line;
+            do
+              echo "  - ${line}"
+              if [ ! -f ${line} ]; then
+                echo ${line} >> ${PROJECTS_TO_BUILD} 
+              fi
+            done
+
+      - run: 
+          name: "Building Docker Images For All Projects Affected"
+          type: shell
+          command: |
+            echo "Building Docker Images For All Projects Affected" \
+              && [ $(wc -l ${PROJECTS_TO_BUILD} | awk '{print $1}') -eq 0 ] \
+              && echo " - No Projects To Build" \
+              || cat ${PROJECTS_TO_BUILD} | while read project;
+                 do
+                   dockerImage=$(echo $project | tr '[:upper:]' '[:lower:]' | awk -F'/' '{print $2}')
+                   echo "- Changing to Project Directory: ${dockerImage}" \
+                     && cd ${HOME_PROJECT}/${project} \
+                     || echo "  - Unable to change directory"
+
+                   if [ -e "./rollback/rollback.cfg" ]; then
+                     ROLLBACK_ENABLED=$(grep "ROLLBACK_ENABLED" ./rollback/rollback.cfg | awk -F'=' '{print $NF}' | tr -d "\r" | tr -d "\n")
+                     ROLLBACK_IMAGE=$(grep "ROLLBACK_IMAGE" ./rollback/rollback.cfg | awk -F'=' '{print $NF}' | tr -d "\r" | tr -d "\n")
+                   fi
+
+                   if [[ "${ROLLBACK_ENABLED}" != "true" ]]; then
+                     echo "  - Locating Dockefile" \
+                       && [ ! -e "./Dockerfile" ] \
+                       && echo "     - Unable to locate docker file." \
+                       && exit 1 || true
+                          
+                     echo "  - Build Initiated." \
+                       && docker login --username "${DOCKER_USERNAME?}" --password "${DOCKER_PASSWORD?}" 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
+                       && echo "    - Docker Login Succeeded" \
+                       || echo "    - Docker Login Failed"
+                       
+                     echo "    - Performing Docker Pull" \
+                       && docker pull "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${DOCKER_CACHE_FROM?}" 1>>${BUILD_LOG} 2>/dev/null \
+                       || true
+                       
+                     echo "    - Performing Docker Build" \
+                       && docker build \
+                            --cache-from "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${DOCKER_CACHE_FROM?}" \
+                            --file "./Dockerfile" \
+                            --tag "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:latest" \
+                            --tag "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${CIRCLE_SHA1?}" \
+                            . 1>>${BUILD_LOG} 2>${ERROR_LOG} \
+                       && echo "      - Docker image successfully created: ${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${CIRCLE_SHA1?}" \
+                       || echo "      - Failed to build docker image"  
+
+                     # Validating to see if docker build resulted in error.
+                     [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
+
+                     echo "    - Pushing Build Artifact to Docker Repo." \
+                       && [ ! "${CIRCLE_BRANCH?}" = "master" ] \
+                       && echo "      - Skipping because this is a pull request" \
+                       || docker push "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${CIRCLE_SHA1?}" 1>>${BUILD_LOG} 2>${ERROR_LOG}
+   
+                     # Validating to see if docker push of the image was successful.
+                     [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
+
+                     echo "    - Pushing Latest Tag" \
+                       && [ ! "${CIRCLE_BRANCH?}" = "master" ] \
+                       && echo "      - Skipping because this is not a merge into master" \
+                       || docker push "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:latest" 1>>${BUILD_LOG} 2>${ERROR_LOG}
+
+                     # Validating to see if docker push of latest was successful.
+                     [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
+
+                     echo "  - Build execution complete."; echo 
+                   else
+                     echo "  - Rollback Requested. Build Not Executed." \
+                       && echo ${project} 1>>${PROJECTS_TO_ROLLBACK} 2>${ERROR_LOG} \
+                       || echo "    - Unable to insert ${project} into rollback file."
+                   fi       
+
+                   # Validation that nothing went wrong throughout the build process.
+                   [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
+                 done
+
+      - run: &pull_rollback_image
+          name: Pulling Of Rollback Image And Re-tagging Of Latest
+          type: shell
+          command: |
+            echo "Projects to Rollback" \
+            && [ $(wc -l ${PROJECTS_TO_ROLLBACK} | awk '{print $1}') -eq 0 ] \
+              && echo "- No projects found to rollback." \
+              || cat ${PROJECTS_TO_ROLLBACK} | while read project;
+                 do
+                   dockerImage=$(echo $project | tr '[:upper:]' '[:lower:]' | awk -F'/' '{print $2}')
+                   echo "- Changing to Project Directory: ${dockerImage}" \
+                     && cd ${HOME_PROJECT}/${project} \
+                     || echo "- Unable to change directory"                      
+
+                   [ -e "./rollback/rollback.cfg" ] \
+                     && ROLLBACK_IMAGE=$(grep "ROLLBACK_IMAGE" ./rollback/rollback.cfg | awk -F'=' '{print $NF}') || true
+
+                   echo "   - Rollback Initiated." \
+                     && docker login --username "${DOCKER_USERNAME?}" --password "${DOCKER_PASSWORD?}" 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
+                     && echo "    - Docker Login Succeeded" \
+                     || echo "    - Docker Login Failed"
+
+                   echo "    - Rolling Back Using ${ROLLBACK_IMAGE}" \
+                     && docker pull "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${ROLLBACK_IMAGE?}" 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
+                     || echo "   - Failed to pull ${ROLLBACK_IMAGE}"
+                  
+                   # Validating to see if docker pull of rollback image was successful.
+                   [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
+                   
+                   echo "    - Re-tagging Latest With Rollback Image" \
+                     && [ "${CIRCLE_BRANCH?}" != "master" ] \
+                     && echo "      - Tagging not executed. Not a merge to master." \
+                     || docker tag "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${ROLLBACK_IMAGE?}" \
+                          "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:latest" 1>>${BUILD_LOG} 2>>${ERROR_LOG} 
+                          
+                   # Validating to see if re-tagging of latest was successful.
+                   [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
+
+                   echo "    - Pushing Re-tagged Latest" \
+                     && [ "${CIRCLE_BRANCH?}" != "master" ] \
+                     && echo "      - Tagging not executed. Not a merge to master." \
+                     || docker push "${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:latest" 1>>${BUILD_LOG} 2>>${ERROR_LOG} 
+
+                   # Validating to see if docker push of latest was successful.
+                   [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
+                 done
+
+      - run: &install_terraform
+          name: Install Terraform
+          type: shell
+          command: |
+            echo "Installing Terraform"
+            url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION?}/terraform_${TERRAFORM_VERSION?}_linux_amd64.zip"
+            wget -qO- "${url?}" | bsdtar -xvf- -C "${HOME?}/bin"
+            chmod +x "${HOME?}/bin/terraform"
+      - run: 
+          name: Terraform Format check
+          type: shell
+          command: |
+            terraform fmt -check
+
+      - run: &terraform_implementation
+          name: Terraform Implementaion
+          type: shell
+          command: |
+            echo "Implementing Terraform For All Projects Affected." \
+             && [ $(wc -l ${PROJECTS_TO_BUILD} | awk '{print $1}') -eq 0 ] \
+             && echo " - No terraform to implement" \
+             || cat ${PROJECTS_TO_BUILD} | while read project;
+                do
+                  dockerImage=$(echo $project | tr '[:upper:]' '[:lower:]' | awk -F'/' '{print $2}')
+                  echo "- Changing to Project Directory: ${dockerImage}" \
+                    && cd ${HOME_PROJECT}/${project} \
+                    || echo "   - Unable to change directory"
+
+                  [ -e "./rollback/rollback.cfg" ] \
+                    && ROLLBACK_ENABLED=$(grep "ROLLBACK_ENABLED" ./rollback/rollback.cfg | awk -F'=' '{print $NF}') \
+                    && ROLLBACK_IMAGE=$(grep "ROLLBACK_IMAGE" ./rollback/rollback.cfg | awk -F'=' '{print $NF}') \
+                    || true
+
+                  echo "  - Changing directory to terraform location: ${TERRAFORM_LOCATION}" \
+                    && cd ${TERRAFORM_LOCATION} \
+                    || echo "    - Unable to change directory"
+                               
+                  echo "  - Implementing Terraform" \
+                    && echo "    - Initializing terraform" \
+                    && terraform init 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
+                    || echo "    - Unable to initialize terraform"
+
+                  echo "  - Terraform Plan" \
+                    && [ "${ROLLBACK_ENABLED}" != "true" ] \
+                    && terraform plan -var "image=${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${CIRCLE_SHA1?}" \
+                         -out terraform_plan 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
+                    && echo "    - Terraform plan execution using ${CIRCLE_SHA1?}" \
+                    || true 
+                    
+                    [ "${ROLLBACK_ENABLED}" == "true" ] \
+                      && terraform plan -var "image=${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${ROLLBACK_IMAGE}" \
+                         -out terraform_plan 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
+                      && echo "    - Terraform plan execution using rollback images ${ROLLBACK_IMAGE}" \
+                      || true
+
+                  echo "  - Terraform Apply" \
+                    && [ "${CIRCLE_BRANCH}" != "master" ] \
+                    && echo "    - Skipping terraform apply because this is not a merge into master" \
+                    || true  
+                    
+                    [ "${CIRCLE_BRANCH}" == "master" ] \
+                      && terraform apply terraform_plan 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
+                      && echo "    - Terraform applied" \
+                      || true
+                done
+
+      - run: &remove_temporary_files
+          name: "Remove temporary files"
+          type: shell
+          command: |
+            rm -f ${PROJECTS_TO_BUILD}
+            rm -f ${AFFECTED_FILES}
+            rm -f ${BUILD_LOG}
+            rm -f ${ERROR_LOG}
+
+  deploy_qa:
+    machine: true
+    environment:
+      <<: *environment_variables
+      TERRAFORM_LOCATION: ./deploy/qa
+    steps:
+      - checkout
+      - run: 
+          <<: *creating_temporary_files
+      - run: 
+          <<: *determine_projects_to_build
+      - run: 
+          <<: *install_terraform
+      - run: terraform fmt -check
+      - run: 
+          <<: *terraform_implementation
+      - run:
+          <<: *remove_temporary_files
+
+  deploy_prod:
+    machine: true
+    environment:
+      <<: *environment_variables
+      TERRAFORM_LOCATION: ./deploy/prod
+    steps:
+      - checkout
+      - run:
+          <<: *creating_temporary_files
+      - run: 
+          <<: *determine_projects_to_build
+      - run:
+          <<: *install_terraform
+      - run: terraform fmt -check
+      - run:
+          <<: *terraform_implementation
+      - run:
+          <<: *remove_temporary_files
+
+workflows:
+  version: 2
+  deployment_pipeline:
+    jobs:
+      - build
+      - advance_to_qa:
+          requires:
+            - build
+          type: approval
+          filters:
+            branches:
+              only:
+                - master
+      - deploy_qa:
+          requires:
+            - advance_to_qa
+      - advance_to_prod:
+          requires:
+            - deploy_qa
+          type: approval
+      - deploy_prod:
+          requires:
+            - advance_to_prod
