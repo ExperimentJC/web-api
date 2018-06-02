@@ -292,25 +292,6 @@ jobs:
       - run:
           <<: *remove_temporary_files
 
-  deploy_prod:
-    machine: true
-    environment:
-      <<: *environment_variables
-      TERRAFORM_LOCATION: ./deploy/prod
-    steps:
-      - checkout
-      - run:
-          <<: *creating_temporary_files
-      - run: 
-          <<: *determine_projects_to_build
-      - run:
-          <<: *install_terraform
-      - run: terraform fmt -check
-      - run:
-          <<: *terraform_implementation
-      - run:
-          <<: *remove_temporary_files
-
 workflows:
   version: 2
   deployment_pipeline:
@@ -327,10 +308,3 @@ workflows:
       - deploy_qa:
           requires:
             - advance_to_qa
-      - advance_to_prod:
-          requires:
-            - deploy_qa
-          type: approval
-      - deploy_prod:
-          requires:
-            - advance_to_prod
