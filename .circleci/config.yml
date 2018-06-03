@@ -18,8 +18,6 @@ jobs:
       HOME_PROJECT: /home/circleci/project
       ROLLBACK_ENABLED: false
       ROLLBACK_IMAGE: latest
-      TERRAFORM_VERSION: 0.10.8
-      TERRAFORM_LOCATION: ./deploy/dev
       
     steps:
       - checkout
@@ -198,72 +196,6 @@ jobs:
                    [ $(wc -l ${ERROR_LOG} | awk '{print $1}') -ne 0 ] && cat ${ERROR_LOG} && exit 1 || true
                  done
 
-      - run: &install_terraform
-          name: Install Terraform
-          type: shell
-          command: |
-            echo "Installing Terraform"
-            url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION?}/terraform_${TERRAFORM_VERSION?}_linux_amd64.zip"
-            wget -qO- "${url?}" | bsdtar -xvf- -C "${HOME?}/bin"
-            chmod +x "${HOME?}/bin/terraform"
-      - run: 
-          name: Terraform Format check
-          type: shell
-          command: |
-            terraform fmt -check
-
-      - run: &terraform_implementation
-          name: Terraform Implementaion
-          type: shell
-          command: |
-            echo "Implementing Terraform For All Projects Affected." \
-             && [ $(wc -l ${PROJECTS_TO_BUILD} | awk '{print $1}') -eq 0 ] \
-             && echo " - No terraform to implement" \
-             || cat ${PROJECTS_TO_BUILD} | while read project;
-                do
-                  dockerImage=$(echo $project | tr '[:upper:]' '[:lower:]' | awk -F'/' '{print $2}')
-                  echo "- Changing to Project Directory: ${dockerImage}" \
-                    && cd ${HOME_PROJECT}/${project} \
-                    || echo "   - Unable to change directory"
-
-                  [ -e "./rollback/rollback.cfg" ] \
-                    && ROLLBACK_ENABLED=$(grep "ROLLBACK_ENABLED" ./rollback/rollback.cfg | awk -F'=' '{print $NF}') \
-                    && ROLLBACK_IMAGE=$(grep "ROLLBACK_IMAGE" ./rollback/rollback.cfg | awk -F'=' '{print $NF}') \
-                    || true
-
-                  echo "  - Changing directory to terraform location: ${TERRAFORM_LOCATION}" \
-                    && cd ${TERRAFORM_LOCATION} \
-                    || echo "    - Unable to change directory"
-                               
-                  echo "  - Implementing Terraform" \
-                    && echo "    - Initializing terraform" \
-                    && terraform init 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
-                    || echo "    - Unable to initialize terraform"
-
-                  echo "  - Terraform Plan" \
-                    && [ "${ROLLBACK_ENABLED}" != "true" ] \
-                    && terraform plan -var "image=${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${CIRCLE_SHA1?}" \
-                         -out terraform_plan 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
-                    && echo "    - Terraform plan execution using ${CIRCLE_SHA1?}" \
-                    || true 
-                    
-                    [ "${ROLLBACK_ENABLED}" == "true" ] \
-                      && terraform plan -var "image=${COMPANY_NAME}/${CIRCLE_PROJECT_REPONAME}-${dockerImage}:${ROLLBACK_IMAGE}" \
-                         -out terraform_plan 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
-                      && echo "    - Terraform plan execution using rollback images ${ROLLBACK_IMAGE}" \
-                      || true
-
-                  echo "  - Terraform Apply" \
-                    && [ "${CIRCLE_BRANCH}" != "master" ] \
-                    && echo "    - Skipping terraform apply because this is not a merge into master" \
-                    || true  
-                    
-                    [ "${CIRCLE_BRANCH}" == "master" ] \
-                      && terraform apply terraform_plan 1>>${BUILD_LOG} 2>>${ERROR_LOG} \
-                      && echo "    - Terraform applied" \
-                      || true
-                done
-
       - run: &remove_temporary_files
           name: "Remove temporary files"
           type: shell
@@ -272,39 +204,3 @@ jobs:
             rm -f ${AFFECTED_FILES}
             rm -f ${BUILD_LOG}
             rm -f ${ERROR_LOG}
-
-  deploy_qa:
-    machine: true
-    environment:
-      <<: *environment_variables
-      TERRAFORM_LOCATION: ./deploy/qa
-    steps:
-      - checkout
-      - run: 
-          <<: *creating_temporary_files
-      - run: 
-          <<: *determine_projects_to_build
-      - run: 
-          <<: *install_terraform
-      - run: terraform fmt -check
-      - run: 
-          <<: *terraform_implementation
-      - run:
-          <<: *remove_temporary_files
-
-workflows:
-  version: 2
-  deployment_pipeline:
-    jobs:
-      - build
-      - advance_to_qa:
-          requires:
-            - build
-          type: approval
-          filters:
-            branches:
-              only:
-                - master
-      - deploy_qa:
-          requires:
-            - advance_to_qa
