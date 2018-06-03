@@ -8,5 +8,7 @@ namespace WebApi.Test.Contract
     {
         [DataMember]
         public string Echo { get; set; }
+        [DataMember]
+        public DateTime CurrentTime { get; set; }
     }
 }
