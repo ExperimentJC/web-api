@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.27703.2000
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WebApi.Test", "src\WebApi.Test\WebApi.Test.csproj", "{706B17EC-CB77-4544-B61A-C5DB507F026F}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WebApi.Test.Contract", "src\WebApi.Test.Contract\WebApi.Test.Contract.csproj", "{19C64643-7442-4197-A4DD-74E2A5CDC0F3}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{CA8A2D69-CC55-44B1-A7DF-A50B78F0E7A3}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docker", "docker", "{610EE6C8-6E5B-46A2-A76A-5F797BD9C084}"
+	ProjectSection(SolutionItems) = preProject
+		Dockerfile = Dockerfile
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "deploy", "deploy", "{D94ABDB5-E9F0-4A25-A834-C97679803BD8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "rollback", "rollback", "{E268C35A-4BE5-4B32-960A-9EEB1848A022}"
+	ProjectSection(SolutionItems) = preProject
+		rollback\rollback.cfg = rollback\rollback.cfg
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{71D49B50-12DC-4AEC-B7CB-7F1E1BFEA41A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "dev", "dev", "{77E500E8-1666-47AA-BB1E-53AFA21094E3}"
+	ProjectSection(SolutionItems) = preProject
+		deploy\dev\main.tf = deploy\dev\main.tf
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ecs-service-module", "ecs-service-module", "{E89A621A-A247-46E1-BD0B-12E5F2A064EF}"
+	ProjectSection(SolutionItems) = preProject
+		deploy\ecs-service-module\containers.json.tmpl = deploy\ecs-service-module\containers.json.tmpl
+		deploy\ecs-service-module\main.tf = deploy\ecs-service-module\main.tf
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{706B17EC-CB77-4544-B61A-C5DB507F026F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{706B17EC-CB77-4544-B61A-C5DB507F026F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{706B17EC-CB77-4544-B61A-C5DB507F026F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{706B17EC-CB77-4544-B61A-C5DB507F026F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{19C64643-7442-4197-A4DD-74E2A5CDC0F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{19C64643-7442-4197-A4DD-74E2A5CDC0F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{19C64643-7442-4197-A4DD-74E2A5CDC0F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{19C64643-7442-4197-A4DD-74E2A5CDC0F3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{706B17EC-CB77-4544-B61A-C5DB507F026F} = {CA8A2D69-CC55-44B1-A7DF-A50B78F0E7A3}
+		{19C64643-7442-4197-A4DD-74E2A5CDC0F3} = {CA8A2D69-CC55-44B1-A7DF-A50B78F0E7A3}
+		{77E500E8-1666-47AA-BB1E-53AFA21094E3} = {D94ABDB5-E9F0-4A25-A834-C97679803BD8}
+		{E89A621A-A247-46E1-BD0B-12E5F2A064EF} = {D94ABDB5-E9F0-4A25-A834-C97679803BD8}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {92F5FD20-FF02-4744-BF77-A27004BB7510}
+	EndGlobalSection
+EndGlobal
