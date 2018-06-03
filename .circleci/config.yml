@@ -13,7 +13,7 @@ jobs:
       PROJECTS_TO_ROLLBACK: /tmp/projects.to.rollback
 
       # Build Variables	   
-      COMPANY_NAME: hautelook
+      COMPANY_NAME: expjc
       DOCKER_CACHE_FROM: latest
       HOME_PROJECT: /home/circleci/project
       ROLLBACK_ENABLED: false
