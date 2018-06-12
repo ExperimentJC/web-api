@@ -17,7 +17,7 @@ namespace WebApi.Test.Controllers
             return Ok(
                         new PingResponse
                         {
-                            Echo = echo + " is the echo",
+                            Echo = echo + " is",
                             CurrentTime = DateTime.Now
                         }
                      );
