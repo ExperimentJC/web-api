@@ -33,6 +33,9 @@ namespace WebApi.Test
             {
                 app.UseDeveloperExceptionPage();
             }
+            int x = 0;
+            
+            int y = x;
 
             app.UseMvc();
         }
